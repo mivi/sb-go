@@ -1,0 +1,21 @@
+Golang build order
+lib9
+libbio
+libmach
+
+cmd dir
+6l/enam.c
+cc (contains cc.y)
+6l (creates 6l executable) -lbio -l9
+6a (a.y, executable) ../6l/enam.o  -lbio -l9
+6c (executable) ../6l/enam.o  ../cc/cc.ao -lbio -l9
+gc (go.y) gc.ao
+6g (executable) ../6l/enam.o  ../gc/gc.ao -lbio -l9 -lm
+
+cov (executable) -lmach -lbio -l9
+godefs (executable) -lbio -l9
+gopack (executable) -lmach -lbio -l9
+gotest
+nm (6nm executable) -lmach -lbio -l9
+prof (6prof executable) -lmach -lbio -l9
+
