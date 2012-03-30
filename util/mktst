@@ -1,0 +1,372 @@
+#!/bin/bash
+
+# Copyright © 2010 Vishal Jain <cse.vishal@gmail.com> (http://techforb.blogspot.com).  All rights reserved.
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+export GREP_OPTIONS=""
+
+#eval last_arg=\$$#
+#echo "$[`echo $#`]"
+#echo $2
+#echo '$[2]'
+#echo "$last_arg"
+#echo "${BASH_ARGV[1]}"
+
+COUNT=0
+EXTRAARGS=""
+myargv=($@)              # create array from arguments
+myargc=${#myargv[*]}
+arr[$myargc]=""          #relevant files go here
+CNT=0                    # count of relevant files in arr
+#echo "Listing args with \"\$*\": $* $@"
+#echo "Listing args with ${#ar[*]} ${ar[0]} ${ar[10]}"
+
+while [ $COUNT -lt $myargc ]; do
+  let f=COUNT+1
+#  let val=$[$COUNT]
+#  eval val=\$$COUNT
+  val=${myargv[$COUNT]}
+  echo $val
+#for i in $*
+#do
+#  echo $i
+	#case $i in
+	case $val in
+    	--benchmarks=*)
+		BENCHPAT=`echo $val | sed 's/[-a-zA-Z0-9]*=//'`
+		;;
+  -b)
+    eval BENCHPAT=${myargv[$f]}   #\$$f
+    let COUNT=COUNT+1
+    ;;
+    	--testcases=*)
+		TESTPAT=`echo $val | sed 's/[-a-zA-Z0-9]*=//'`
+    #TESTPAT="/"$TESTPAT"/p"
+		;;
+  -t)
+    eval TESTPAT=${myargv[$f]}   #\$$f
+    #TESTPAT="/"$TESTPAT"/p"
+    let COUNT=COUNT+1
+    ;;
+    	-v)
+		VERBOSE=1
+		;;
+    	-l)       #list all testcases and benchmark
+		LISTALL=1
+		;;
+    	-k)       
+		KEEPFILES=1
+		;;
+    	-B)       
+		RUNALLBENCH=1
+		;;
+    -s)        #if test pattern is not specified, then use -s to specify NOT to
+#    run testcases
+    DONOTRUNTEST=1
+    ;;
+    -na)        #if test pattern is not specified, then use -s to specify NOT to
+#    run testcases
+    NOEXTRAARGS=1
+    ;;
+    --*)
+      EXTRAARGS=${EXTRAARGS}" "${val}
+    ;;
+    -*)
+      EXTRAARGS=${EXTRAARGS}" "${val}
+      let COUNT=COUNT+1
+      eval f=${myargv[$COUNT]}      #\$$COUNT
+      if [ -f $f ]; then
+        let COUNT=COUNT-1
+      else
+        EXTRAARGS=${EXTRAARGS}" "${f}
+      fi
+    ;;
+   *)
+    arr[$CNT]=$val
+    let CNT=CNT+1
+		;;
+  	esac
+  let COUNT=COUNT+1
+done
+
+#echo "Total numbers of arguments: $# ${BASH_ARGV[`$#`]}"
+#echo "extra val $EXTRAARGS"
+#echo "cnt $CNT"
+#echo "${arr[1]}"
+
+if [ $CNT -eq 0 ]; then
+	printf "Usage: %s [-k] [-v] [-s] [-l] [-na] [-B] [-b pattern] [-t pattern] args\n" $(basename $0) >&2
+  echo "-v: Verbose o/p from go executable"
+  echo "-k: Don't delete object and executable files after execution"
+  echo "-s: Don't run any testcase"
+  echo "-l: Only list testcases (and benchmarks if -b/-B specified"
+  echo "-na: Ignore extra arguments parsed on command line to shell script"
+  echo "-B: Run all benchmarks. .* pattern will be passed to testcase"
+  echo "    in -benchmarks='.*'."
+  echo "-b: Specify pattern for benchmark filtering. Same as --benchmarks='pattern'"
+  echo "    Filtering done in shell script. golang exec is passed -benchmarks='.*'."
+  echo "-t: Specify pattern for testcase filtering. Same as --testcases='pattern'"
+  echo "args: Golang source files. Args with - or -- will be passed to executable."
+  echo "      Args with - will be passed without next item if next item is a file."
+  echo
+  echo "Copyright: Vishal Jain <cse.vishal@gmail.com>. All rights reserved."
+  LISTALL=1
+fi
+
+COUNT=0
+if [ -z $LISTALL ]; then
+  . $GOROOT/src/Make.$GOARCH
+fi
+
+thispath=`pwd`
+while [ $COUNT -lt $CNT ]; do
+  cd $thispath
+  val=${arr[$COUNT]}
+  echo "Processing $val"
+  echo
+  let COUNT=COUNT+1
+  PACKAGEDIFF=0
+  argu=""
+  # contains filename without extension
+  packfilename=`echo "$(basename $val)" | sed -e 's/\.go//g' | sed -e 's/\s//g' `
+#  echo "debug"
+#  echo "$val"
+#  echo "$(dirname $val)"
+#  echo "`pwd`"
+#  cd $(dirname $val)
+#  echo "`pwd`"
+#  abspath=`pwd`
+#  echo "$abspath"
+
+#  abspath=`cd $(basename $val); pwd`
+#  echo  $(dirname $val)
+  if [ -z $LISTALL ]; then
+    \rm -f $(dirname $val)/runtst.go~ $(dirname $val)/runtst.$O $(dirname $val)/runtst.out $(dirname $val)/${packfilename}.$O
+    touch  $(dirname $val)/runtst.go~
+
+
+    echo 'package main' >> $(dirname $val)/runtst.go~
+    clientpack=`sed -n '/^package/p' $val | sed -e 's/package//g' | sed -e 's/\s//g'`
+    if [ $clientpack != "main" ]; then
+      PACKAGEDIFF=1
+    fi
+
+    echo 'import (' >> $(dirname $val)/runtst.go~
+    echo '  "flag"' >> $(dirname $val)/runtst.go~
+    if [[ -z "$DONOTRUNTEST" || "$RUNALLBENCH" || "$BENCHPAT" ]]; then
+     echo '  "fmt"' >> $(dirname $val)/runtst.go~
+     echo '  "testing"' >> $(dirname $val)/runtst.go~
+    fi
+
+    if [ $PACKAGEDIFF -ne 0 ]; then
+      echo "  $clientpack \"./$packfilename\"" >> $(dirname $val)/runtst.go~
+      clientpack=$clientpack"." #prepare it to use for appending to testcase names
+    else
+      clientpack=""
+    fi
+    echo ')' >> $(dirname $val)/runtst.go~
+    echo '' >> $(dirname $val)/runtst.go~
+    echo 'func main() {' >> $(dirname $val)/runtst.go~
+    echo '  flag.Parse()' >> $(dirname $val)/runtst.go~
+#    echo '' >> $(dirname $val)/runtst.go~
+#    echo '  if flag.Lookup("v").Value.String() == "false" {' >> $(dirname $val)/runtst.go~
+#    echo '    fmt.Println("Please specify -v=true for verbose print")' >> $(dirname $val)/runtst.go~
+#    echo '  }' >> $(dirname $val)/runtst.go~
+#    echo '' >> $(dirname $val)/runtst.go~
+#    echo '  if len(flag.Lookup("benchmarks").Value.String()) == 0 {' >> $(dirname $val)/runtst.go~
+#    echo '    fmt.Println("Please specify -benchmarks=\"<regexp>\" to run benchmarks. See benchmark.go")' >> $(dirname $val)/runtst.go~
+#    echo '  }' >> $(dirname $val)/runtst.go~
+    echo '' >> $(dirname $val)/runtst.go~
+  fi
+
+################ BENCHMARK ###########################
+  if [[ "$BENCHPAT" || "$RUNALLBENCH" ]]; then
+    RUNALLBENCH=1
+    if [ -z $LISTALL ]; then
+      echo '  fmt.Println("Running Benchmarks")' >> $(dirname $val)/runtst.go~
+#      echo '  fmt.Println(flag.Lookup("benchmarks").Value.String())' >> $(dirname $val)/runtst.go~
+      echo '  testing.RunBenchmarks(&[...]testing.Benchmark{' >> $(dirname $val)/runtst.go~
+    fi
+  fi
+  if [ "$BENCHPAT" ]; then
+    echo $BENCHPAT
+    echo
+    if [ -z $LISTALL ]; then
+      sed -n '/func\sBench/p' $val | sed -n "/"$BENCHPAT"/p" | sed -e 's/(.*$//g' | sed -e 's/^.* Bench/Bench/g' | sed "s/O//; s/.*/testing.Benchmark{\"&\", "$clientpack"&},/" >> $(dirname $val)/runtst.go~ 
+    fi
+    sed -n '/func\sBench/p' $val | sed -n "/"$BENCHPAT"/p" | sed -e 's/(.*$//g' | sed -e 's/^.* Bench/Bench/g'  
+  elif [ "$RUNALLBENCH" ]; then
+    if [ -z $LISTALL ]; then
+      sed -n '/func\sBench/p' $val | sed -e 's/(.*$//g' | sed -e 's/^.* Bench/Bench/g' | sed "s/O//; s/.*/testing.Benchmark{\"&\", "$clientpack"&},/" >> $(dirname $val)/runtst.go~ 
+    fi
+    sed -n '/func\sBench/p' $val | sed -e 's/(.*$//g' | sed -e 's/^.* Bench/Bench/g'  
+  fi
+
+  if [[ "$BENCHPAT" || "$RUNALLBENCH" ]]; then
+    if [ -z $LISTALL ]; then
+      echo '            })' >> $(dirname $val)/runtst.go~
+    fi
+  fi
+
+
+################ TESTCASE ###########################
+  if [ -z "$DONOTRUNTEST" ]; then
+    echo '  fmt.Println("Running Testcases")' >> $(dirname $val)/runtst.go~
+    echo '  testing.Main(&[...]testing.Test{' >> $(dirname $val)/runtst.go~
+  fi
+  if [ "$TESTPAT" ]; then
+    echo $TESTPAT
+    echo
+    if [ -z $LISTALL ]; then
+      sed -n '/func\sTest/p' $val | sed -n "/"$TESTPAT"/p" | sed -e 's/(.*$//g' | sed -e 's/^.* Test/Test/g' | sed "s/O//; s/.*/testing.Test{\"&\", "$clientpack"&},/" >> $(dirname $val)/runtst.go~ 
+    fi
+    sed -n '/func\sTest/p' $val | sed -n "/"$TESTPAT"/p" | sed -e 's/(.*$//g' | sed -e 's/^.* Test/Test/g'
+  elif [ -z "$DONOTRUNTEST" ]; then
+    if [ -z $LISTALL ]; then
+      sed -n '/func\sTest/p' $val | sed -e 's/(.*$//g' |  sed -e 's/^.* Test/Test/g' | sed "s/O//; s/.*/testing.Test{\"&\", "$clientpack"&},/" >> $(dirname $val)/runtst.go~ 
+    fi
+#    echo `sed -n '/Test/p' $val | sed -e 's/(.*$//g' | sed -e 's/^.* //g' | sed 's/O//; s/.*/testing.Test{"&", &},\\n/'` >> $(dirname $val)/runtst.go~ 
+    sed -n '/func\sTest/p' $val | sed -e 's/(.*$//g' |  sed -e 's/^.* Test/Test/g' 
+  fi
+
+  if [ -z $LISTALL ]; then
+    if [ -z "$DONOTRUNTEST" ]; then
+      echo '            })' >> $(dirname $val)/runtst.go~
+    fi
+  fi
+
+################ CLOSE FUNC MAIN ###########################
+ if [ -z $LISTALL ]; then
+   echo '}' >> $(dirname $val)/runtst.go~
+ fi
+################ COMPILE ###########################
+
+#  echo $GC
+  if [ -z $LISTALL ]; then
+    cd $(dirname $val)
+    if [ $PACKAGEDIFF -ne 0 ]; then
+      $GC -o ${packfilename}.$O $(basename $val)
+      $GC -o runtst.$O runtst.go~
+    else
+      $GC -o runtst.$O runtst.go~ $(basename $val)
+    fi
+    $LD -o runtst.out runtst.$O 
+    cd $thispath
+    if [ "$VERBOSE" ]; then
+      argu=$argu" -v"
+    fi
+#    if [ "$BENCHPAT" ]; then
+#      argu=$argu" -benchmarks=\"$BENCHPAT\""
+    if [ "$RUNALLBENCH" ]; then
+      argu=$argu" -benchmarks=.*"
+    fi
+    if [ -z "$NOEXTRAARGS" ]; then
+      argu=$argu" "$EXTRAARGS
+    fi
+    echo "Running with arguments: $argu"
+    if [ -z "$KEEPFILES" ]; then
+      \rm -f $(dirname $val)/${packfilename}.$O $(dirname $val)/runtst.$O $(dirname $val)/runtst.go~
+    fi
+    if [ "$VERBOSE" ]; then
+      $(dirname $val)/runtst.out -help
+    fi
+    $(dirname $val)/runtst.out $argu
+    if [ -z "$KEEPFILES" ]; then
+      \rm -f $(dirname $val)/runtst.out $(dirname $val)/$(basename $val).out
+    fi
+  fi
+done
+
+
+#vflag=
+#bflag=
+#tflag=
+#while getopts 'vbt:' OPTION
+#do
+#  case $OPTION in
+#  v)	vflag=$OPTIND
+#    ;;
+##    shift $(($OPTIND - 1))
+#  b)	bflag=$OPTIND
+##      let bflag=bflag+1
+#      bval="$OPTARG"
+##    shift $(($OPTIND - 1))
+#    ;;
+#  t)	tflag=$OPTIND
+##      let tflag=tflag+1
+#      tval="$OPTARG"
+##    shift $(($OPTIND - 1))
+#    ;;
+#  ?)	printf "Usage: %s [-v] [-b pattern] [-t pattern] args\n" $(basename $0) >&2
+#    exit 2
+#    ;;
+#  esac
+#done
+#
+#
+##bflag=$(bflag+1)
+#if [ "$vflag" ]
+#then
+#  printf "Option -v specified\n"
+#fi
+##if [ "$bflag" ]
+##then
+##  printf 'Option -b "%s" specified\n' "$bval"
+##fi
+#printf "Remaining arguments are: %s\n" "$*"
+#
+#COUNT=0
+#
+#echo "hhhh"
+#echo "vflag $vflag"
+#echo "bflag $bflag"
+#echo "tflag $tflag"
+#while [ $COUNT -lt $# ]; do
+#  let COUNT=COUNT+1
+#  let f=COUNT+1
+#  echo "count $COUNT"
+#  echo "f $f"
+#  if [ "$vflag" ]; then
+#    if [ $COUNT -eq $vflag ]; then
+#      continue
+#    fi
+#  fi
+#  if [ "$bflag" ]; then
+#    if [ $COUNT -eq $bflag ]; then
+#      continue
+#    fi
+#    if [ $COUNT -eq $f ]; then
+#      continue
+#    fi
+#  fi
+#  if [ "$tflag" ]; then
+#    if [ $COUNT -eq $tflag ]; then
+#      continue
+#    fi
+#    if [ $COUNT -eq $f ]; then
+#      continue
+#    fi
+#  fi
+#  echo "here"
+#  let val=$[COUNT]
+#  echo "$val"
+#done
+#
+#echo $#
